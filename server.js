@@ -1,42 +1,97 @@
+import db from "./db.js";
 import express from "express";
 import cors from "cors";
 
 const app = express();
 
-app.use(cors());
-app.use(express.json());
+app.use((req, res, next) => {
 
-
-let products = [];
-let cart = [];
-let purchases = [];
-let users = [
-    {
-        id: 1,
-        name: "Administrador",
-        email: "admin@gmail.com",
-        password: "admin123",
-        role: "admin"
-    },
-    {
-        id: 2,
-        name: "Cliente",
-        email: "cliente@gmail.com",
-        password: "123456",
-        role: "user"
-    }
-];
-let currentUser = null;
-
-
-app.get("/products", (req, res) => {
-
-    res.json(products);
+    next();
 
 });
 
-app.get("/cart", (req, res) => {
-    res.json(cart);
+app.use(cors());
+app.use(express.json());
+try {
+
+    const connection = await db.getConnection();
+
+    console.log("✅ Conectado a MySQL");
+
+    connection.release();
+
+} catch (error) {
+
+    console.error(error);
+
+}
+
+let currentUser = null;
+
+
+app.get("/products", async (req, res) => {
+
+    try {
+
+        const [rows] = await db.query(
+            "SELECT * FROM products"
+        );
+
+        res.json(rows);
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al obtener los productos"
+        });
+
+    }
+
+});
+
+app.get("/cart", async (req, res) => {
+
+    if (!currentUser) {
+
+        return res.status(401).json({
+            message: "Debe iniciar sesión"
+        });
+
+    }
+
+    try {
+
+        const [rows] = await db.query(
+
+            `SELECT
+                cart.id,
+                products.name,
+                products.category,
+                products.price,
+                cart.quantity
+             FROM cart
+             INNER JOIN products
+             ON cart.product_id = products.id
+             WHERE cart.user_id = ?`,
+
+            [currentUser.id]
+
+        );
+
+        res.json(rows);
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al obtener el carrito"
+        });
+
+    }
+
 });
 
 app.get("/purchase", (req, res) => {
@@ -59,88 +114,273 @@ app.get("/profile", (req, res) => {
 
 });
 
-app.post("/products", (req, res) => {
+app.get("/users", async (req, res) => {
 
-    const newProduct = {
+    try {
 
-        id: Date.now(),
+        const [rows] = await db.query(
 
-        name: req.body.name,
+            `SELECT
+                id,
+                name,
+                email,
+                role
+             FROM users`
 
-        category: req.body.category,
+        );
 
-        price: req.body.price
+        res.json(rows);
 
-    };
+    } catch (error) {
 
+        console.error(error);
 
-    products.push(newProduct);
-
-
-    res.json({
-        message: "Producto creado",
-        product: newProduct
-    });
-
-});
-
-app.post("/cart", (req, res) => {
-
-    const product = req.body;
-
-    cart.push(product);
-
-    res.json({
-        message: "Producto agregado al carrito",
-        cart
-    });
-
-});
-
-app.post("/purchase", (req, res) => {
-
-    const purchase = {
-        id: Date.now(),
-        products: cart,
-        total: req.body.total,
-        date: new Date().toLocaleDateString()
-    };
-
-    purchases.push(purchase);
-
-    cart = [];
-
-    res.json({
-        message: "Compra realizada correctamente",
-        purchase
-    });
-
-});
-
-app.post("/login", (req, res) => {
-
-    const { email, password } = req.body;
-
-    const user = users.find(
-        user =>
-            user.email === email &&
-            user.password === password
-    );
-
-    if (!user) {
-
-        return res.status(401).json({
-            message: "Correo o contraseña incorrectos"
+        res.status(500).json({
+            message: "Error al obtener usuarios"
         });
 
     }
 
-    currentUser = user;
+});
 
-    res.json({
-        message: "Inicio de sesión correcto",
-        user
-    });
+app.get("/reports", async (req, res) => {
+
+    try {
+
+        const [rows] = await db.query(
+
+            `SELECT
+                purchases.id,
+                users.name,
+                users.email,
+                purchases.total,
+                purchases.purchase_date
+             FROM purchases
+             INNER JOIN users
+             ON purchases.user_id = users.id
+             ORDER BY purchases.purchase_date DESC`
+
+        );
+
+        res.json(rows);
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al obtener los reportes"
+        });
+
+    }
+
+});
+
+app.post("/cart", async (req, res) => {
+
+    const { id } = req.body;
+
+    if (!currentUser) {
+
+        return res.status(401).json({
+            message: "Debe iniciar sesión"
+        });
+
+    }
+
+    try {
+
+        await db.query(
+
+            `INSERT INTO cart
+            (user_id, product_id, quantity)
+            VALUES (?, ?, 1)`,
+
+            [currentUser.id, id]
+
+        );
+
+        res.json({
+            message: "Producto agregado al carrito"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al agregar al carrito"
+        });
+
+    }
+
+});
+
+app.post("/purchase", async (req, res) => {
+
+    if (!currentUser) {
+
+        return res.status(401).json({
+            message: "Debe iniciar sesión"
+        });
+
+    }
+
+    try {
+
+        const [cartItems] = await db.query(
+
+            `SELECT
+                cart.product_id,
+                cart.quantity,
+                products.price
+             FROM cart
+             INNER JOIN products
+             ON cart.product_id = products.id
+             WHERE cart.user_id = ?`,
+
+            [currentUser.id]
+
+        );
+
+        if (cartItems.length === 0) {
+
+            return res.status(400).json({
+                message: "El carrito está vacío"
+            });
+
+        }
+
+        const total = cartItems.reduce(
+
+            (sum, item) =>
+
+                sum + (item.price * item.quantity),
+
+            0
+
+        );
+
+        const [purchase] = await db.query(
+
+            `INSERT INTO purchases
+            (user_id, total)
+            VALUES (?, ?)`,
+
+            [currentUser.id, total]
+
+        );
+
+        await db.query(
+
+            "DELETE FROM cart WHERE user_id = ?",
+
+            [currentUser.id]
+
+        );
+
+        res.json({
+            message: "Compra realizada correctamente"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al realizar la compra"
+        });
+
+    }
+
+});
+
+app.post("/register", async (req, res) => {
+
+    const { name, email, password } = req.body;
+
+    try {
+
+        const [rows] = await db.query(
+
+            "SELECT id FROM users WHERE email = ?",
+
+            [email]
+
+        );
+
+        if (rows.length > 0) {
+
+            return res.status(400).json({
+                message: "El correo ya está registrado"
+            });
+
+        }
+
+        await db.query(
+
+            `INSERT INTO users
+            (name, email, password, role)
+            VALUES (?, ?, ?, 'user')`,
+
+            [name, email, password]
+
+        );
+
+        res.json({
+            message: "Usuario registrado correctamente"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al registrar el usuario"
+        });
+
+    }
+
+});
+
+app.post("/login", async (req, res) => {
+
+    const { email, password } = req.body;
+
+    try {
+
+        const [rows] = await db.query(
+
+            "SELECT * FROM users WHERE email = ? AND password = ?",
+
+            [email, password]
+
+        );
+
+        if (rows.length === 0) {
+
+            return res.status(401).json({
+                message: "Correo o contraseña incorrectos"
+            });
+
+        }
+
+        currentUser = rows[0];
+
+        res.json({
+            message: "Inicio de sesión correcto",
+            user: currentUser
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error en el servidor"
+        });
+
+    }
 
 });
 
@@ -154,31 +394,86 @@ app.post("/logout", (req, res) => {
 
 });
 
-app.delete("/products/:id", (req, res) => {
+app.delete("/products/:id", async (req, res) => {
 
-    products = products.filter(
-        product => product.id != req.params.id
-    );
+    try {
 
+        await db.query(
+            "DELETE FROM products WHERE id = ?",
+            [req.params.id]
+        );
 
-    res.json({
-        message: "Producto eliminado"
-    });
+        res.json({
+            message: "Producto eliminado"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al eliminar el producto"
+        });
+
+    }
 
 });
 
-app.delete("/cart/:id", (req, res) => {
+app.delete("/cart/:id", async (req, res) => {
 
-    cart = cart.filter(
-        product => product.id != req.params.id
-    );
+    try {
 
-    res.json({
-        message: "Producto eliminado"
-    });
+        await db.query(
+
+            "DELETE FROM cart WHERE id = ?",
+
+            [req.params.id]
+
+        );
+
+        res.json({
+            message: "Producto eliminado"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al eliminar"
+        });
+
+    }
 
 });
 
+app.delete("/users/:id", async (req, res) => {
+
+    try {
+
+        await db.query(
+
+            "DELETE FROM users WHERE id = ?",
+
+            [req.params.id]
+
+        );
+
+        res.json({
+            message: "Usuario eliminado"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al eliminar usuario"
+        });
+
+    }
+
+});
 
 app.listen(3000, () => {
 
