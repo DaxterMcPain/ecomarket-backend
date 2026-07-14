@@ -1,3 +1,4 @@
+import "dotenv/config";
 import db from "./db.js";
 import express from "express";
 import cors from "cors";
@@ -170,6 +171,79 @@ app.get("/reports", async (req, res) => {
 
         res.status(500).json({
             message: "Error al obtener los reportes"
+        });
+
+    }
+
+});
+
+app.post("/products", async (req, res) => {
+
+    const { name, category, price } = req.body;
+
+    try {
+
+        await db.query(
+
+            `INSERT INTO products
+            (name, category, price)
+            VALUES (?, ?, ?)`,
+
+            [name, category, price]
+
+        );
+
+        res.json({
+            message: "Producto agregado correctamente"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al agregar el producto"
+        });
+
+    }
+
+});
+
+app.post("/guest", async (req, res) => {
+
+    try {
+
+        const guestEmail = `invitado_${Date.now()}@guest.ecomarket.local`;
+        const guestPassword = Math.random().toString(36).slice(2);
+
+        const [result] = await db.query(
+
+            `INSERT INTO users
+            (name, email, password, role)
+            VALUES (?, ?, ?, 'guest')`,
+
+            ["Invitado", guestEmail, guestPassword]
+
+        );
+
+        currentUser = {
+            id: result.insertId,
+            name: "Invitado",
+            email: guestEmail,
+            role: "guest"
+        };
+
+        res.json({
+            message: "Ingresaste como invitado",
+            user: currentUser
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            message: "Error al ingresar como invitado"
         });
 
     }
@@ -399,6 +473,11 @@ app.delete("/products/:id", async (req, res) => {
     try {
 
         await db.query(
+            "DELETE FROM cart WHERE product_id = ?",
+            [req.params.id]
+        );
+
+        await db.query(
             "DELETE FROM products WHERE id = ?",
             [req.params.id]
         );
@@ -452,6 +531,16 @@ app.delete("/users/:id", async (req, res) => {
     try {
 
         await db.query(
+            "DELETE FROM cart WHERE user_id = ?",
+            [req.params.id]
+        );
+
+        await db.query(
+            "DELETE FROM purchases WHERE user_id = ?",
+            [req.params.id]
+        );
+
+        await db.query(
 
             "DELETE FROM users WHERE id = ?",
 
@@ -475,10 +564,12 @@ app.delete("/users/:id", async (req, res) => {
 
 });
 
-app.listen(3000, () => {
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
 
     console.log(
-        "Servidor funcionando en puerto 3000"
+        `Servidor funcionando en puerto ${PORT}`
     );
 
 });
